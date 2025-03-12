@@ -4,77 +4,81 @@ import (
 	"bufio"
 	"encoding/csv"
 	"fmt"
-	"golang.org/x/text/encoding/japanese"
-	"golang.org/x/text/transform"
 	"io"
 	"os"
 	"path/filepath"
+
+	"golang.org/x/text/encoding/japanese"
+	"golang.org/x/text/transform"
 )
 
 func main() {
 	if len(os.Args) < 3 {
 		fmt.Println("Usage: go run main.go <inputFile> <outputFile>")
-		return
+		os.Exit(1)
 	}
 
-	inputFile := os.Args[1]
-	outputFile := os.Args[2]
-
-	inputFilePath, err := filepath.Abs(inputFile)
+	inputPath, err := filepath.Abs(os.Args[1])
 	if err != nil {
-		fmt.Println(fmt.Errorf("failed to get absolute path for input file: %v", err))
-		return
+		fmt.Fprintf(os.Stderr, "failed to get absolute path for input file: %v\n", err)
+		os.Exit(1)
 	}
 
-	outputFilePath, err := filepath.Abs(outputFile)
+	outputPath, err := filepath.Abs(os.Args[2])
 	if err != nil {
-		fmt.Println(fmt.Errorf("failed to get absolute path for output file: %v", err))
-		return
+		fmt.Fprintf(os.Stderr, "failed to get absolute path for output file: %v\n", err)
+		os.Exit(1)
 	}
 
-	i, err := os.Open(inputFilePath)
+	if err := convertFile(inputPath, outputPath); err != nil {
+		fmt.Fprintf(os.Stderr, "Error during conversion: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("File converted successfully")
+}
+
+func convertFile(inputPath, outputPath string) error {
+	inputFile, err := os.Open(inputPath)
 	if err != nil {
-		fmt.Println(fmt.Errorf("failed to open input file: %v", err))
-		return
+		return fmt.Errorf("failed to open input file: %v", err)
 	}
-	defer i.Close()
+	defer inputFile.Close()
 
-	o, err := os.Create(outputFilePath)
+	outputFile, err := os.Create(outputPath)
 	if err != nil {
-		fmt.Println(fmt.Errorf("failed to create output file: %v", err))
-		return
+		return fmt.Errorf("failed to create output file: %v", err)
 	}
-	defer o.Close()
+	defer outputFile.Close()
 
-	r := transform.NewReader(bufio.NewReader(i), japanese.ShiftJIS.NewDecoder())
+	transformedReader := transform.NewReader(bufio.NewReader(inputFile), japanese.ShiftJIS.NewDecoder())
+	csvReader := csv.NewReader(transformedReader)
 
-	w := bufio.NewWriter(o)
-	defer w.Flush()
-
-	cr := csv.NewReader(r)
-	cw := csv.NewWriter(w)
+	bufferedWriter := bufio.NewWriter(outputFile)
+	csvWriter := csv.NewWriter(bufferedWriter)
 
 	for {
-		record, err := cr.Read()
+		record, err := csvReader.Read()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			fmt.Println(fmt.Errorf("failed to read from input file: %v", err))
-			return
+			return fmt.Errorf("failed to read from input file: %v", err)
 		}
 
-		if err := cw.Write(record); err != nil {
-			fmt.Println(fmt.Errorf("failed to write to output file: %v", err))
-			return
+		if err := csvWriter.Write(record); err != nil {
+			return fmt.Errorf("failed to write to output file: %v", err)
 		}
 	}
 
-	cw.Flush()
-	if err := cw.Error(); err != nil {
-		fmt.Println(fmt.Errorf("failed to flush output file: %v", err))
-		return
+	csvWriter.Flush()
+	if err := csvWriter.Error(); err != nil {
+		return fmt.Errorf("failed to flush csv writer: %v", err)
 	}
 
-	fmt.Println("File converted successfully")
+	if err := bufferedWriter.Flush(); err != nil {
+		return fmt.Errorf("failed to flush output file: %v", err)
+	}
+
+	return nil
 }
